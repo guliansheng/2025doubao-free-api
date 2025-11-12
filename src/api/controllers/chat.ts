@@ -1265,6 +1265,9 @@ function checkResult(result: AxiosResponse) {
  */
 async function receiveStream(stream: any): Promise<any> {
   let temp = Buffer.from('');
+  // 记录图片生成结果（去重）
+  const images: Array<{ key?: string; preview?: string; ori?: string; thumb?: string }> = [];
+  const emittedImageKeys = new Set<string>();
   return new Promise((resolve, reject) => {
     // 消息初始化
     const data = {
@@ -1282,6 +1285,22 @@ async function receiveStream(stream: any): Promise<any> {
       created: util.unixTimestamp(),
     };
     let isEnd = false;
+    const finalize = () => {
+      // 去掉尾部多余换行
+      data.choices[0].message.content = data.choices[0].message.content.replace(/\n$/, "");
+      // 将图片以 Markdown 形式附加
+      const imgs = images.filter(Boolean);
+      if (imgs.length) {
+        const md = imgs
+          .map((img, i) => {
+            const url = img.preview || img.ori || img.thumb;
+            const ori = img.ori || url;
+            return `![生成图片${i + 1}](${url})\n原图: ${ori}`;
+          })
+          .join("\n\n");
+        data.choices[0].message.content += (data.choices[0].message.content ? "\n\n" : "") + `【图片生成完成：共${imgs.length}张】\n` + md;
+      }
+    };
     const parser = createParser((event) => {
       try {
         if (event.type !== "event" || isEnd) return;
@@ -1289,12 +1308,11 @@ async function receiveStream(stream: any): Promise<any> {
         const rawResult = _.attempt(() => JSON.parse(event.data));
         if (_.isError(rawResult))
           throw new Error(`Stream response invalid: ${event.data}`);
-        // console.log(rawResult);
         if (rawResult.code)
           throw new APIException(EX.API_REQUEST_FAILED, `[请求doubao失败]: ${rawResult.code}-${rawResult.message}`);
         if (rawResult.event_type == 2003) {
           isEnd = true;
-          data.choices[0].message.content = data.choices[0].message.content.replace(/\n$/, "");
+          finalize();
           return resolve(data);
         }
         if (rawResult.event_type != 2001)
@@ -1304,7 +1322,7 @@ async function receiveStream(stream: any): Promise<any> {
           throw new Error(`Stream response invalid: ${rawResult.event_data}`);
         if (result.is_finish) {
           isEnd = true;
-          data.choices[0].message.content = data.choices[0].message.content.replace(/\n$/, "");
+          finalize();
           return resolve(data);
         }
         if (!data.id && result.conversation_id)
@@ -1312,18 +1330,36 @@ async function receiveStream(stream: any): Promise<any> {
         const message = result.message;
         if (!message || !message.content)
           return;
+        // 先提取文本
         let text = "";
-        const content = _.attempt(() => JSON.parse(message.content));
-        if (!_.isError(content)) {
-          if (typeof content === "string") text = content;
-          else if (typeof content.text === "string") text = content.text;
-          else if (content.delta && typeof content.delta.text === "string") text = content.delta.text;
-          else if (typeof content.content === "string") text = content.content;
+        const parsed = _.attempt(() => JSON.parse(message.content));
+        if (!_.isError(parsed)) {
+          if (typeof parsed === "string") text = parsed;
+          else if (typeof parsed.text === "string") text = parsed.text;
+          else if (parsed.delta && typeof parsed.delta.text === "string") text = parsed.delta.text;
+          else if (typeof parsed.content === "string") text = parsed.content;
         } else if (typeof message.content === "string") {
           text = message.content;
         }
         if (text)
           data.choices[0].message.content += text;
+        // 再提取图片
+        const ctype = message.content_type;
+        if (ctype === 2074) {
+          const payload = _.isError(parsed) ? _.attempt(() => JSON.parse(message.content)) : parsed;
+          if (!_.isError(payload) && payload && Array.isArray(payload.creations)) {
+            payload.creations.forEach((c: any) => {
+              const img = c?.image || {};
+              const key = img?.key as string | undefined;
+              const preview = img?.image_preview?.url || img?.image_thumb?.url;
+              const ori = img?.image_ori?.url;
+              if (key && !emittedImageKeys.has(key)) {
+                emittedImageKeys.add(key);
+                images.push({ key, preview, ori, thumb: img?.image_thumb?.url });
+              }
+            });
+          }
+        }
       } catch (err) {
         logger.error(err);
         reject(err);
@@ -1345,7 +1381,10 @@ async function receiveStream(stream: any): Promise<any> {
       parser.feed(buffer.toString());
     });
     stream.once("error", (err) => reject(err));
-    stream.once("close", () => resolve(data));
+    stream.once("close", () => {
+      finalize();
+      resolve(data);
+    });
   });
 }
 
@@ -1362,6 +1401,9 @@ function createTransStream(stream: any, endCallback?: Function) {
   let temp = Buffer.from('');
   // 消息创建时间
   const created = util.unixTimestamp();
+  // 用于图片生成的提示与去重
+  let imageNoticeSent = false;
+  const emittedImageKeys = new Set<string>();
   // 创建转换流
   const transStream = new PassThrough();
   !transStream.closed &&
@@ -1387,7 +1429,6 @@ function createTransStream(stream: any, endCallback?: Function) {
       const rawResult = _.attempt(() => JSON.parse(event.data));
       if (_.isError(rawResult))
         throw new Error(`Stream response invalid: ${event.data}`);
-      // console.log(rawResult);
       if (rawResult.code)
         throw new APIException(EX.API_REQUEST_FAILED, `[请求doubao失败]: ${rawResult.code}-${rawResult.message}`);
       if (rawResult.event_type == 2003) {
@@ -1437,13 +1478,64 @@ function createTransStream(stream: any, endCallback?: Function) {
       const message = result.message;
       if (!message || !message.content)
         return;
-      let text = "";
+
+      // 统一解析 content
       const content = _.attempt(() => JSON.parse(message.content));
+
+      // 图片生成事件（content_type = 2074）
+      const ctype = message.content_type;
+      if (ctype === 2074 && !_.isError(content)) {
+        const creations = Array.isArray((content as any).creations) ? (content as any).creations : [];
+        if (!imageNoticeSent && creations.length) {
+          const notice = `\n[图片生成中（共${creations.length}张）...]\n`;
+          transStream.write(`data: ${JSON.stringify({
+            id: convId,
+            model: MODEL_NAME,
+            object: "chat.completion.chunk",
+            choices: [
+              {
+                index: 0,
+                delta: { role: "assistant", content: notice },
+                finish_reason: null,
+              },
+            ],
+            created,
+          })}\n\n`);
+          imageNoticeSent = true;
+        }
+        for (const c of creations) {
+          const img = c?.image || {};
+          const key = img?.key as string | undefined;
+          const url = img?.image_preview?.url || img?.image_thumb?.url || img?.image_ori?.url;
+          const ori = img?.image_ori?.url || url;
+          if (key && url && !emittedImageKeys.has(key)) {
+            emittedImageKeys.add(key);
+            const idx = emittedImageKeys.size;
+            const md = `![生成图片${idx}](${url})\n原图: ${ori}\n`;
+            transStream.write(`data: ${JSON.stringify({
+              id: convId,
+              model: MODEL_NAME,
+              object: "chat.completion.chunk",
+              choices: [
+                {
+                  index: 0,
+                  delta: { role: "assistant", content: md },
+                  finish_reason: null,
+                },
+              ],
+              created,
+            })}\n\n`);
+          }
+        }
+      }
+
+      // 普通文本增量
+      let text = "";
       if (!_.isError(content)) {
         if (typeof content === "string") text = content;
-        else if (typeof content.text === "string") text = content.text;
-        else if (content.delta && typeof content.delta.text === "string") text = content.delta.text;
-        else if (typeof content.content === "string") text = content.content;
+        else if (typeof (content as any).text === "string") text = (content as any).text;
+        else if ((content as any).delta && typeof (content as any).delta.text === "string") text = (content as any).delta.text;
+        else if (typeof (content as any).content === "string") text = (content as any).content;
       } else if (typeof message.content === "string") {
         text = message.content;
       }

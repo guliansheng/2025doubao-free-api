@@ -5,7 +5,7 @@ const API_BASE = process.env.API_BASE || "http://127.0.0.1:8000";
 const SESSION_ID = process.env.SESSION_ID || "YOUR_SESSION_ID_HERE";
 // Use external image URL to avoid base64 issues
 const IMAGE_URL = process.env.IMAGE_URL ||
-  "https://picsum.photos/800/600"; // 示例图片 URL，请替换为你自己的图片
+  "https://picsum.photos/800/600"; 
 
 async function main() {
   const messages = [
