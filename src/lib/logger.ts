@@ -1,5 +1,5 @@
 import path from 'node:path';
-import _util from 'util';
+import _util from 'node:util';
 
 import 'colors';
 import _ from 'lodash';
@@ -11,13 +11,13 @@ import config from './config.ts';
 import util from './util.ts';
 
 
-// 全局日志文本清洗：移除/掩码可能出现的 base64 和 data URI，防止日志泄露/爆炸
+// 全局日志文本清洗：移�?掩码可能出现�?base64 �?data URI，防止日志泄�?爆炸
 function sanitizeLogString(input: string): string {
   try {
     if (!input || typeof input !== "string") return input as any;
     let s = input;
 
-    // 处理 data:*;base64, 段落（逐字符向后扫描，直到遇到非 base64 字符）
+    // 处理 data:*;base64, 段落（逐字符向后扫描，直到遇到�?base64 字符�?
     const prefix = "data:";
     let idx = s.indexOf(prefix);
     while (idx !== -1) {
@@ -32,10 +32,10 @@ function sanitizeLogString(input: string): string {
       idx = s.indexOf(prefix, start + replacement.length);
     }
 
-    // 替换过长的 base64-like 连续串
+    // 替换过长�?base64-like 连续�?
     s = s.replace(/([A-Za-z0-9+/=]{256,})/g, (m) => `[[OMITTED_BASE64 len=${m.length}]]`);
 
-    // 防止超长日志刷屏：硬性截断
+    // 防止超长日志刷屏：硬性截�?
     if (s.length > 8000) {
       s = s.slice(0, 8000) + `...[[TRUNCATED len=${s.length}]]`;
     }
@@ -171,7 +171,7 @@ class Logger {
     }
 
     footer() {
-        this.#writer.flush();  //将未写入文件的日志缓存写入
+        this.#writer.flush();  //将未写入文件的日志缓存写�?
         this.#writer.writeSync(Buffer.from(`\n\n===================== LOG END ${dateFormat(new Date(), "yyyy-MM-dd HH:mm:ss.SSS")} =====================\n\n`));
     }
 
@@ -225,3 +225,4 @@ class Logger {
 }
 
 export default new Logger();
+
