@@ -1,15 +1,17 @@
-import path from 'path';
+import path from 'node:path';
+import process from 'node:process';
 
 import fs from 'fs-extra';
 import minimist from 'minimist';
 import _ from 'lodash';
 
-const cmdArgs = minimist(process.argv.slice(2));  //获取命令行参数
-const envVars = process.env;  //获取环境变量
+const isDenoEnv = typeof Deno !== "undefined";
+const cmdArgs = minimist((process?.argv || []).slice(2));  //获取命令行参数
+const envVars = process?.env || (isDenoEnv && (Deno as any).env ? (Deno as any).env.toObject() : {});  //获取环境变量
 
 class Environment {
 
-    /** 命令行参数 */
+    /** 命令行参数*/
     cmdArgs: any;
     /** 环境变量 */
     envVars: any;
@@ -21,7 +23,7 @@ class Environment {
     host?: string;
     /** 服务端口 */
     port?: number;
-    /** 包参数 */
+    /** 包参数*/
     package: any;
 
     constructor(options: any = {}) {
@@ -37,8 +39,17 @@ class Environment {
 
 }
 
+function loadPackageJson() {
+    try {
+        return JSON.parse(fs.readFileSync(path.join(path.resolve(), "package.json")).toString());
+    } catch (_) {
+        const fallbackVersion = envVars?.npm_package_version || envVars?.VERCEL_GIT_COMMIT_SHA || "0.0.0";
+        return { version: fallbackVersion };
+    }
+}
+
 export default new Environment({
     cmdArgs,
     envVars,
-    package: JSON.parse(fs.readFileSync(path.join(path.resolve(), "package.json")).toString())
+    package: loadPackageJson()
 });

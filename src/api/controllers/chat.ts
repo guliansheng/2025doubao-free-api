@@ -1,6 +1,6 @@
-import { PassThrough } from "stream";
-import crypto from "crypto";
-import path from "path";
+import { PassThrough } from "node:stream";
+import crypto from "node:crypto";
+import path from "node:path";
 import _ from "lodash";
 import mime from "mime";
 import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
@@ -10,6 +10,7 @@ import EX from "@/api/consts/exceptions.ts";
 import { createParser } from "eventsource-parser";
 import logger from "@/lib/logger.ts";
 import util from "@/lib/util.ts";
+import process from "node:process";
 
 // 模型名称
 const MODEL_NAME = "doubao";

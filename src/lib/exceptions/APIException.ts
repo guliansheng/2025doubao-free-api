@@ -1,4 +1,4 @@
-import Exception from './Exception.js';
+import Exception from './Exception.ts';
 
 export default class APIException extends Exception {
 

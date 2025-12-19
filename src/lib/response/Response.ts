@@ -1,5 +1,6 @@
 import mime from 'mime';
 import _ from 'lodash';
+import { Readable } from "node:stream";
 
 import Body from './Body.ts';
 import util from '../util.ts';
@@ -54,6 +55,50 @@ export default class Response {
             ctx.body = this.body.toObject();
         else
             ctx.body = this.body;
+    }
+
+    /**
+     * Convert to a fetch Response so we can run on Deno Deploy or any web runtime.
+     */
+    toWebResponse() {
+        const headers = new Headers(this.headers || {});
+        const status = this.statusCode || 200;
+        if (this.type && !headers.has("content-type"))
+            headers.set("content-type", mime.getType(this.type) || this.type);
+
+        let body: any = this.body;
+        if (Body.isInstance(body)) {
+            body = JSON.stringify(body.toObject());
+            headers.set("content-type", headers.get("content-type") || "application/json");
+        }
+        else if (_.isPlainObject(body) || Array.isArray(body)) {
+            body = JSON.stringify(body);
+            headers.set("content-type", headers.get("content-type") || "application/json");
+        }
+        else if (body instanceof Readable) {
+            // Node stream -> Web stream
+            if ((Readable as any).toWeb)
+                body = (Readable as any).toWeb(body);
+            else {
+                const iterator = (body as any)[Symbol.asyncIterator]
+                    ? (body as any)[Symbol.asyncIterator]()
+                    : null;
+                body = iterator
+                    ? new ReadableStream({
+                        async pull(controller) {
+                            const { value, done } = await iterator.next();
+                            if (done) return controller.close();
+                            controller.enqueue(value);
+                        },
+                        cancel() {
+                            (body as any)?.destroy?.();
+                        }
+                    })
+                    : body as any;
+            }
+        }
+
+        return new globalThis.Response(body as BodyInit | null, { status, headers });
     }
 
     static isInstance(value) {

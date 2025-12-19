@@ -1,0 +1,9 @@
+{
+  "importMap": "import_map.json",
+  "tasks": {
+    "start": "deno run -A main.ts"
+  },
+  "compilerOptions": {
+    "lib": ["deno.ns", "dom"]
+  }
+}

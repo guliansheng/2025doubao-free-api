@@ -14,7 +14,7 @@ const startupTime = performance.now();
 
   logger.info("<<<< doubao free server >>>>");
   logger.info("Version:", environment.package.version);
-  logger.info("Process id:", process.pid);
+  logger.info("Process id:", typeof process !== "undefined" ? process.pid : "deno");
   logger.info("Environment:", environment.env);
   logger.info("Service name:", config.service.name);
 

@@ -1,7 +1,7 @@
-import os from "os";
-import path from "path";
-import crypto from "crypto";
-import { Readable, Writable } from "stream";
+import os from "node:os";
+import path from "node:path";
+import crypto from "node:crypto";
+import { Readable, Writable } from "node:stream";
 
 import "colors";
 import mime from "mime";

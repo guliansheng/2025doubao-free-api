@@ -1,4 +1,4 @@
-import path from 'path';
+import path from 'node:path';
 
 import fs from 'fs-extra';
 import yaml from 'yaml';
@@ -58,8 +58,17 @@ export class ServiceConfig {
 
     static load() {
         const external = _.pickBy(environment, (v, k) => ["name", "host", "port"].includes(k) && !_.isUndefined(v));
-        if(!fs.pathExistsSync(CONFIG_PATH)) return new ServiceConfig(external);
-        const data = yaml.parse(fs.readFileSync(CONFIG_PATH).toString());
+        let data: any = null;
+        try {
+            if(fs.pathExistsSync(CONFIG_PATH))
+                data = yaml.parse(fs.readFileSync(CONFIG_PATH).toString());
+        } catch {}
+        if(!data && typeof Deno !== "undefined") {
+            try {
+                const url = new URL(`../../../configs/${environment.env}/service.yml`, import.meta.url);
+                data = yaml.parse(Deno.readTextFileSync(url));
+            } catch {}
+        }
         return new ServiceConfig({ ...data, ...external });
     }
 

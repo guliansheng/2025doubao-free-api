@@ -1,10 +1,11 @@
-import path from 'path';
+import path from 'node:path';
 import _util from 'util';
 
 import 'colors';
 import _ from 'lodash';
 import fs from 'fs-extra';
 import { format as dateFormat } from 'date-fns';
+import process from "node:process";
 
 import config from './config.ts';
 import util from './util.ts';
@@ -46,14 +47,18 @@ function sanitizeLogString(input: string): string {
 }
 
 const isVercelEnv = process.env.VERCEL;
+const isDenoEnv = typeof Deno !== "undefined";
+const isFileLoggingEnabled = !isVercelEnv && !isDenoEnv;
 
 class LogWriter {
 
     #buffers = [];
 
     constructor() {
-        !isVercelEnv && fs.ensureDirSync(config.system.logDirPath);
-        !isVercelEnv && this.work();
+        if (isFileLoggingEnabled) {
+            fs.ensureDirSync(config.system.logDirPath);
+            this.work();
+        }
     }
 
     push(content) {
@@ -62,16 +67,17 @@ class LogWriter {
     }
 
     writeSync(buffer) {
-        !isVercelEnv && fs.appendFileSync(path.join(config.system.logDirPath, `/${util.getDateString()}.log`), buffer);
+        isFileLoggingEnabled && fs.appendFileSync(path.join(config.system.logDirPath, `/${util.getDateString()}.log`), buffer);
     }
 
     async write(buffer) {
-        !isVercelEnv && await fs.appendFile(path.join(config.system.logDirPath, `/${util.getDateString()}.log`), buffer);
+        if (isFileLoggingEnabled)
+            await fs.appendFile(path.join(config.system.logDirPath, `/${util.getDateString()}.log`), buffer);
     }
 
     flush() {
         if(!this.#buffers.length) return;
-        !isVercelEnv && fs.appendFileSync(path.join(config.system.logDirPath, `/${util.getDateString()}.log`), Buffer.concat(this.#buffers));
+        isFileLoggingEnabled && fs.appendFileSync(path.join(config.system.logDirPath, `/${util.getDateString()}.log`), Buffer.concat(this.#buffers));
     }
 
     work() {
