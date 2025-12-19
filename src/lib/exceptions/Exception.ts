@@ -1,10 +1,10 @@
-import assert from 'assert';
+import assert from 'node:assert';
 
 import _ from 'lodash';
 
 export default class Exception extends Error {
 
-    /** 错误码 */
+    /** 错误�?*/
     errcode: number;
     /** 错误消息 */
     errmsg: string;
@@ -14,7 +14,7 @@ export default class Exception extends Error {
     httpStatusCode: number;
 
     /**
-     * 构造异常
+     * 构造异�?
      * 
      * @param exception 异常
      * @param _errmsg 异常消息
