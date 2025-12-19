@@ -38,7 +38,7 @@ jobs:
         uses: denoland/deployctl@v1
         with:
           project: "2025doubao"
-          entrypoint: "dist/index.js"
+          entrypoint: "main.ts"
           root: ""
           
           
