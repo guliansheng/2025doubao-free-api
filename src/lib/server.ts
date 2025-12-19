@@ -1,8 +1,3 @@
-import Koa from 'koa';
-import KoaRouter from 'koa-router';
-import koaRange from 'koa-range';
-import koaCors from "koa2-cors";
-import koaBody from 'koa-body';
 import _ from 'lodash';
 
 import Exception from './exceptions/Exception.ts';
@@ -22,56 +17,92 @@ type RouteItem = {
     handler: Function;
 };
 
+type NodeServerDeps = {
+    Koa: any;
+    KoaRouter: any;
+    koaRange: any;
+    koaCors: any;
+    koaBody: any;
+};
+
+let nodeServerDepsPromise: Promise<NodeServerDeps> | null = null;
+
+async function loadNodeServerDeps(): Promise<NodeServerDeps> {
+    if (!nodeServerDepsPromise) {
+        nodeServerDepsPromise = Promise.all([
+            import('koa'),
+            import('koa-router'),
+            import('koa-range'),
+            import('koa2-cors'),
+            import('koa-body')
+        ]).then(([koa, router, range, cors, body]) => ({
+            Koa: koa.default,
+            KoaRouter: router.default,
+            koaRange: range.default || range,
+            koaCors: cors.default || cors,
+            koaBody: body.default
+        }));
+    }
+    return nodeServerDepsPromise;
+}
+
 class Server {
 
     app;
     router;
     fetchRoutes: RouteItem[] = [];
     isFetchServer: boolean;
+    nodeReady = false;
     
     constructor() {
         this.isFetchServer = isDenoServeEnv;
-        if (!this.isFetchServer) {
-            this.app = new Koa();
-            this.app.use(koaCors());
-            // ËåÉÂõ¥ËØ∑Ê±ÇÊîØÊåÅ
-            this.app.use(koaRange);
-            this.router = new KoaRouter({ prefix: config.service.urlPrefix });
-            // ÂâçÁΩÆÂ§ÑÁêÜÂºÇÂ∏∏Êã¶Êà™
-            this.app.use(async (ctx: any, next: Function) => {
-                if(ctx.request.type === "application/xml" || ctx.request.type === "application/ssml+xml")
-                    ctx.req.headers["content-type"] = "text/xml";
-                try { await next() }
-                catch (err) {
-                    logger.error(err);
-                    const failureBody = new FailureBody(err);
-                    new Response(failureBody).injectTo(ctx);
-                }
-            });
-            // ËΩΩËç∑Ëß£ÊûêÂô®ÊîØÊåÅ
-            this.app.use(koaBody(_.clone(config.system.requestBody)));
-            this.app.on("error", (err: any) => {
-                // ÂøΩÁï•ËøûÊé•ÈáçËØï„ÄÅ‰∏≠Êñ≠„ÄÅÁÆ°ÈÅì„ÄÅÂèñÊ∂àÈîôËØØ
-                if (["ECONNRESET", "ECONNABORTED", "EPIPE", "ECANCELED"].includes(err.code)) return;
-                logger.error(err);
-            });
-            logger.success("Server initialized");
-        } else {
+        if (this.isFetchServer) {
             logger.success("Server initialized (Deno fetch handler)");
         }
     }
 
+    async #ensureNodeApp() {
+        if (this.isFetchServer || this.nodeReady) return;
+        const { Koa, KoaRouter, koaRange, koaCors, koaBody } = await loadNodeServerDeps();
+        this.app = new Koa();
+        this.app.use(koaCors());
+        // ∑∂Œß«Î«Û÷ß≥÷
+        this.app.use(koaRange);
+        this.router = new KoaRouter({ prefix: config.service.urlPrefix });
+        // «∞÷√¥¶¿Ì“Ï≥£¿πΩÿ
+        this.app.use(async (ctx: any, next: Function) => {
+            if(ctx.request.type === "application/xml" || ctx.request.type === "application/ssml+xml")
+                ctx.req.headers["content-type"] = "text/xml";
+            try { await next() }
+            catch (err) {
+                logger.error(err);
+                const failureBody = new FailureBody(err);
+                new Response(failureBody).injectTo(ctx);
+            }
+        });
+        // ‘ÿ∫…Ω‚Œˆ∆˜÷ß≥÷
+        this.app.use(koaBody(_.clone(config.system.requestBody)));
+        this.app.on("error", (err: any) => {
+            // ∫ˆ¬‘¡¨Ω”÷ÿ ‘°¢÷–∂œ°¢π‹µ¿°¢»°œ˚¥ÌŒÛ
+            if (["ECONNRESET", "ECONNABORTED", "EPIPE", "ECANCELED"].includes(err.code)) return;
+            logger.error(err);
+        });
+        this.nodeReady = true;
+        logger.success("Server initialized");
+    }
+
     /**
-     * ÈôÑÂä†Ë∑ØÁî±
+     * ∏Ωº”¬∑”…
      * 
-     * @param routes Ë∑ØÁî±ÂàóË°®
+     * @param routes ¬∑”…¡–±Ì
      */
-    attachRoutes(routes: any[]) {
+    async attachRoutes(routes: any[]) {
         if (this.isFetchServer) {
             this.fetchRoutes = this.#normalizeRoutes(routes);
             this.fetchRoutes.forEach(route => logger.info(`Route ${route.path} attached`));
             return;
         }
+        await this.#ensureNodeApp();
         routes.forEach((route: any) => {
             const prefix = route.prefix || "";
             for (let method in route) {
@@ -94,7 +125,7 @@ class Server {
         this.app.use((ctx: any) => {
             const request = new RequestModel(ctx);
             logger.debug(`-> ${ctx.request.method} ${ctx.request.url} request is not supported - ${request.remoteIP || "unknown"}`);
-            const message = `[ËØ∑Ê±ÇÊúâËØØ]: Ê≠£Á°ÆËØ∑Ê±ÇÂ∫î‰∏∫POST -> /v1/chat/completionsÔºåÂΩìÊúüËØ∑Ê±Ç‰∏∫ ${ctx.request.method} -> ${ctx.request.url} ËØ∑Á∫†Ê≠£`;
+            const message = `[«Î«Û”–ŒÛ]: ’˝»∑«Î«Û”¶Œ™POST -> /v1/chat/completions£¨µ±∆⁄«Î«ÛŒ™ ${ctx.request.method} -> ${ctx.request.url} «Îæ¿’˝`;
             logger.warn(message);
             const failureBody = new FailureBody(new Error(message));
             const response = new Response(failureBody);
@@ -203,10 +234,10 @@ class Server {
     }
 
     /**
-     * ËØ∑Ê±ÇÂ§ÑÁêÜ
+     * «Î«Û¥¶¿Ì
      * 
-     * @param ctx ‰∏ä‰∏ãÊñá
-     * @param routeFn Ë∑ØÁî±ÊñπÊ≥ï
+     * @param ctx …œœ¬Œƒ
+     * @param routeFn ¬∑”…∑Ω∑®
      */
     #requestProcessing(ctx: any, routeFn: Function): Promise<any> {
         return new Promise(resolve => {
@@ -261,7 +292,7 @@ class Server {
     }
 
     /**
-     * ÁõëÂê¨Á´ØÂè£
+     * º‡Ã˝∂Àø⁄
      */
     async listen() {
         if (this.isFetchServer && typeof (Deno as any).serve === "function") {
@@ -269,7 +300,7 @@ class Server {
                 const ctx = await this.#buildFetchContext(req);
                 const matched = this.#matchRoute(req.method, ctx.request.path);
                 if (!matched) {
-                    const message = `[ËØ∑Ê±ÇÊúâËØØ]: Ê≠£Á°ÆËØ∑Ê±ÇÂ∫î‰∏∫POST -> /v1/chat/completionsÔºåÂΩìÊúüËØ∑Ê±Ç‰∏∫ ${req.method} -> ${ctx.request.path} ËØ∑Á∫†Ê≠£`;
+                    const message = `[«Î«Û”–ŒÛ]: ’˝»∑«Î«Û”¶Œ™POST -> /v1/chat/completions£¨µ±∆⁄«Î«ÛŒ™ ${req.method} -> ${ctx.request.path} «Îæ¿’˝`;
                     logger.warn(message);
                     return new Response(new FailureBody(new Exception(EX.SYSTEM_NOT_ROUTE_MATCHING, message)), { statusCode: 404 }).toWebResponse();
                 }
@@ -281,6 +312,7 @@ class Server {
             logger.success(`Server listening via Deno.serve (prefix: ${config.service.urlPrefix || "/"})`);
             return;
         }
+        await this.#ensureNodeApp();
         const host = config.service.host;
         const port = config.service.port;
         await Promise.all([

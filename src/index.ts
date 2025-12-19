@@ -18,7 +18,7 @@ const startupTime = performance.now();
   logger.info("Environment:", environment.env);
   logger.info("Service name:", config.service.name);
 
-  server.attachRoutes(routes);
+  await server.attachRoutes(routes);
   await server.listen();
 
   config.service.bindAddress &&
@@ -30,3 +30,5 @@ const startupTime = performance.now();
     )
   )
   .catch((err) => console.error(err));
+
+
